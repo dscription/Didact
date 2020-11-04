@@ -1,28 +1,3 @@
-// // const element = <h1 title="foo">Hello</h1>;
-// const element = {
-//   type: 'h1',
-//   props: {
-//     title: 'foo',
-//     children: 'Hello',
-//   },
-// };
-
-// // const container = document.getElementById('root');
-// const container = document.getElementById('root');
-
-// // ReactDOM.render(element, container);
-// const node = document.createElement(element.type);
-// node['title'] = element.props.title;
-
-// const text = document.createTextNode('');
-// text['nodeValue'] = element.props.children;
-
-// node.append(text);
-// container.appendChild(node);
-
-// Step 1: The createElement Function
-
-// The react createElement() function
 function createElement(type, props, ...children) {
   return {
     type,
@@ -35,7 +10,6 @@ function createElement(type, props, ...children) {
   };
 }
 
-// React doesn’t wrap primitive values or create empty arrays when there aren’t children, but we do it because it will simplify our code, and for our library we prefer simple code than performant code.
 function createTextElement(text) {
   return {
     type: 'TEXT_ELEMENT',
@@ -52,12 +26,7 @@ function createDom(fiber) {
       ? document.createTextNode('')
       : document.createElement(fiber.type);
 
-  const isProperty = (key) => key !== 'children';
-  Object.keys(fiber.props)
-    .filter(isProperty)
-    .forEach((name) => {
-      dom[name] = fiber.props[name];
-    });
+  updateDom(dom, {}, fiber.props);
 
   return dom;
 }
@@ -66,9 +35,8 @@ const isEvent = (key) => key.startsWith('on');
 const isProperty = (key) => key !== 'children' && !isEvent(key);
 const isNew = (prev, next) => (key) => prev[key] !== next[key];
 const isGone = (prev, next) => (key) => !(key in next);
-
 function updateDom(dom, prevProps, nextProps) {
-  // Remove old or changed event listeners
+  //Remove old or changed event listeners
   Object.keys(prevProps)
     .filter(isEvent)
     .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
@@ -76,20 +44,23 @@ function updateDom(dom, prevProps, nextProps) {
       const eventType = name.toLowerCase().substring(2);
       dom.removeEventListener(eventType, prevProps[name]);
     });
-  // TODO remove old properties
+
+  // Remove old properties
   Object.keys(prevProps)
     .filter(isProperty)
     .filter(isGone(prevProps, nextProps))
     .forEach((name) => {
       dom[name] = '';
     });
-  // set new or changed properties
+
+  // Set new or changed properties
   Object.keys(nextProps)
     .filter(isProperty)
     .filter(isNew(prevProps, nextProps))
     .forEach((name) => {
       dom[name] = nextProps[name];
     });
+
   // Add event listeners
   Object.keys(nextProps)
     .filter(isEvent)
@@ -112,34 +83,33 @@ function commitWork(fiber) {
     return;
   }
 
-  let domParentFiber = fiber.parent
+  let domParentFiber = fiber.parent;
   while (!domParentFiber.dom) {
-    domParentFiber = domParentFiber.parent
+    domParentFiber = domParentFiber.parent;
   }
-  const domParent = fiber.parent.dom;
+  const domParent = domParentFiber.dom;
 
   if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   } else if (fiber.effectTag === 'DELETION') {
-    commitDeletion(fiber, domParent)
+    commitDeletion(fiber, domParent);
   }
+
   commitWork(fiber.child);
   commitWork(fiber.sibling);
 }
 
 function commitDeletion(fiber, domParent) {
   if (fiber.dom) {
-    domParent.removeChild(fiber.dom)
+    domParent.removeChild(fiber.dom);
   } else {
-    commitDeletion(fiber.child, domParent)
+    commitDeletion(fiber.child, domParent);
   }
 }
 
-
 function render(element, container) {
-  // TODO set next unit of work
   wipRoot = {
     dom: container,
     props: {
@@ -147,7 +117,7 @@ function render(element, container) {
     },
     alternate: currentRoot,
   };
-  deletions: [];
+  deletions = [];
   nextUnitOfWork = wipRoot;
 }
 
@@ -158,11 +128,15 @@ let deletions = null;
 
 function workLoop(deadline) {
   let shouldYield = false;
-
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
     shouldYield = deadline.timeRemaining() < 1;
   }
+
+  if (!nextUnitOfWork && wipRoot) {
+    commitRoot();
+  }
+
   requestIdleCallback(workLoop);
 }
 
@@ -171,11 +145,10 @@ requestIdleCallback(workLoop);
 function performUnitOfWork(fiber) {
   const isFunctionComponent = fiber.type instanceof Function;
   if (isFunctionComponent) {
-    updateFunctionCompent(fiber);
+    updateFunctionComponent(fiber);
   } else {
-    updateHostcomponent(fiber);
+    updateHostComponent(fiber);
   }
-
   if (fiber.child) {
     return fiber.child;
   }
@@ -188,13 +161,49 @@ function performUnitOfWork(fiber) {
   }
 }
 
-function updateFunctionCompent(fiber) {
-  // TODO
-  const children = [fiber.type(fiber.props)]
-  reconcileChildren(fiber, children)
+let wipFiber = null;
+let hookIndex = null;
+
+function updateFunctionComponent(fiber) {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
+  const children = [fiber.type(fiber.props)];
+  reconcileChildren(fiber, children);
 }
 
-function updateHostcomponent(fiber) {
+function useState(initial) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: [],
+  };
+
+  const actions = oldHook ? oldHook.queue : [];
+  actions.forEach((action) => {
+    hook.state = action(hook.state);
+  });
+
+  const setState = (action) => {
+    hook.queue.push(action);
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    };
+    nextUnitOfWork = wipRoot;
+    deletions = [];
+  };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
+}
+
+function updateHostComponent(fiber) {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
   }
@@ -210,11 +219,9 @@ function reconcileChildren(wipFiber, elements) {
     const element = elements[index];
     let newFiber = null;
 
-    // TODO compare oldFiber to element
     const sameType = oldFiber && element && element.type == oldFiber.type;
 
     if (sameType) {
-      // TODO update the node
       newFiber = {
         type: oldFiber.type,
         props: element.props,
@@ -225,7 +232,6 @@ function reconcileChildren(wipFiber, elements) {
       };
     }
     if (element && !sameType) {
-      // TODO add this node
       newFiber = {
         type: element.type,
         props: element.props,
@@ -236,8 +242,7 @@ function reconcileChildren(wipFiber, elements) {
       };
     }
     if (oldFiber && !sameType) {
-      // TODO delete the oldFiber's node
-      oldFiber.effectTag = 'DELECTION';
+      oldFiber.effectTag = 'DELETION';
       deletions.push(oldFiber);
     }
 
@@ -246,46 +251,31 @@ function reconcileChildren(wipFiber, elements) {
     }
 
     if (index === 0) {
-      fiber.child = newFiber;
-    } else {
+      wipFiber.child = newFiber;
+    } else if (element) {
       prevSibling.sibling = newFiber;
     }
-  }
 
-  prevSibling = newFiber;
-  index++;
+    prevSibling = newFiber;
+    index++;
+  }
 }
 
 const Didact = {
   createElement,
   render,
+  useState,
 };
 
 /** @jsx Didact.createElement */
-// If we have a comment like this one, when babel transpiles the JSX it will use the function we define.
-
-// const element = (
-//   <div id="foo">
-//     <a>bar</a>
-//     <b />
-//   </div>
-// );
-
-/** @jsx Didact.createElement */
-function App(props) {
-  return <h1>Hi {props.name}</h1>;
+function Counter() {
+  const [state, setState] = Didact.useState(1);
+  return (
+    <h1 onClick={() => setState((c) => c + 1)} style="user-select: none">
+      Count: {state}
+    </h1>
+  );
 }
-
-const element = <App name="foo" />;
-const container = document.getElementById('root');
-Didact.render(element, container);
-
-const element = Didact.createElement(
-  'div',
-  { id: 'foo' },
-  Didact.createElement('a', null, 'bar'),
-  Didact.createElement('b')
-);
-
+const element = <Counter />;
 const container = document.getElementById('root');
 Didact.render(element, container);

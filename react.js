@@ -112,6 +112,10 @@ function commitWork(fiber) {
     return;
   }
 
+  let domParentFiber = fiber.parent
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent
+  }
   const domParent = fiber.parent.dom;
 
   if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
@@ -119,11 +123,20 @@ function commitWork(fiber) {
   } else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   } else if (fiber.effectTag === 'DELETION') {
-    domParent.removeChild(fiber.dom);
+    commitDeletion(fiber, domParent)
   }
   commitWork(fiber.child);
   commitWork(fiber.sibling);
 }
+
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom)
+  } else {
+    commitDeletion(fiber.child, domParent)
+  }
+}
+
 
 function render(element, container) {
   // TODO set next unit of work
@@ -156,12 +169,12 @@ function workLoop(deadline) {
 requestIdleCallback(workLoop);
 
 function performUnitOfWork(fiber) {
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionCompent(fiber);
+  } else {
+    updateHostcomponent(fiber);
   }
-
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
 
   if (fiber.child) {
     return fiber.child;
@@ -173,6 +186,19 @@ function performUnitOfWork(fiber) {
     }
     nextFiber = nextFiber.parent;
   }
+}
+
+function updateFunctionCompent(fiber) {
+  // TODO
+  const children = [fiber.type(fiber.props)]
+  reconcileChildren(fiber, children)
+}
+
+function updateHostcomponent(fiber) {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  reconcileChildren(fiber, fiber.props.children);
 }
 
 function reconcileChildren(wipFiber, elements) {
@@ -244,6 +270,15 @@ const Didact = {
 //     <b />
 //   </div>
 // );
+
+/** @jsx Didact.createElement */
+function App(props) {
+  return <h1>Hi {props.name}</h1>;
+}
+
+const element = <App name="foo" />;
+const container = document.getElementById('root');
+Didact.render(element, container);
 
 const element = Didact.createElement(
   'div',
